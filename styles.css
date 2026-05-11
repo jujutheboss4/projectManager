@@ -112,6 +112,21 @@ button {
   gap: 10px;
 }
 
+.sync-panel {
+  gap: 12px;
+}
+
+.sync-panel strong {
+  display: block;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.sync-panel p, .sync-help {
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 .section-label, .eyebrow, .summary-label {
   text-transform: uppercase;
   letter-spacing: 0.12em;

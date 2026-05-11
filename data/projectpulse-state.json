@@ -1,0 +1,53 @@
+{
+  "projects": [
+    { "id": "proj-launch", "name": "Website launch", "color": "#8b5cf6", "description": "Landing page, QA, and go-live checklist." },
+    { "id": "proj-mobile", "name": "Mobile refresh", "color": "#06b6d4", "description": "Navigation polish and performance fixes." },
+    { "id": "proj-ops", "name": "Team operations", "color": "#f97316", "description": "Meetings, templates, and handoff process." }
+  ],
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "Finalize homepage hero copy",
+      "projectId": "proj-launch",
+      "assignee": "Mia",
+      "priority": "High",
+      "status": "In Progress",
+      "dueDate": "2026-05-12",
+      "notes": "Make sure the value prop is aligned with the new product positioning.",
+      "createdAt": 1778284800000
+    },
+    {
+      "id": "task-2",
+      "title": "Run mobile layout audit",
+      "projectId": "proj-mobile",
+      "assignee": "Avery",
+      "priority": "Medium",
+      "status": "Review",
+      "dueDate": "2026-05-14",
+      "notes": "Check tablet breakpoints and validate sticky header behavior.",
+      "createdAt": 1778371200000
+    },
+    {
+      "id": "task-3",
+      "title": "Document onboarding checklist",
+      "projectId": "proj-ops",
+      "assignee": "Noah",
+      "priority": "Low",
+      "status": "Backlog",
+      "dueDate": "2026-05-18",
+      "notes": "Turn the current process into a concise step-by-step guide.",
+      "createdAt": 1778457600000
+    },
+    {
+      "id": "task-4",
+      "title": "Approve release QA results",
+      "projectId": "proj-launch",
+      "assignee": "You",
+      "priority": "High",
+      "status": "Done",
+      "dueDate": "2026-05-10",
+      "notes": "All smoke tests passed. Share release notes with stakeholders.",
+      "createdAt": 1778198400000
+    }
+  ]
+}

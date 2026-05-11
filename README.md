@@ -17,3 +17,13 @@ Open `index.html` directly in a browser, or serve the folder with any static ser
 
 - The app uses only static files, so it works without a build step.
 - A `.nojekyll` file is included so GitHub Pages serves the site exactly as-is.
+
+## Repo persistence
+
+The app can persist project and task data to the repository itself by updating [data/projectpulse-state.json](data/projectpulse-state.json).
+
+1. Open the app and click **Sync settings**.
+2. Enable repo sync and enter your GitHub owner, repository, branch, path, and a fine-grained token with `contents: write` permission.
+3. Save the settings, then create or edit tasks normally.
+
+The browser keeps a local cache too, but the GitHub repo becomes the source of truth once sync is enabled.

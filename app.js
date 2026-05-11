@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'project-pulse-state-v1';
+const SYNC_CONFIG_KEY = 'project-pulse-sync-v1';
+const REMOTE_STATE_PATH = './data/projectpulse-state.json';
 const statusOrder = ['Backlog', 'In Progress', 'Review', 'Done'];
 const priorityOrder = ['Low', 'Medium', 'High'];
 
@@ -10,6 +12,17 @@ const projectsSeed = [
 
 let dragSession = null;
 let suppressTaskClick = null;
+
+function defaultSyncConfig() {
+  return {
+    enabled: false,
+    owner: '',
+    repo: '',
+    branch: 'main',
+    path: 'data/projectpulse-state.json',
+    token: '',
+  };
+}
 
 function tomorrow(daysAhead) {
   const date = new Date();
@@ -72,21 +85,174 @@ function loadState() {
     tasks: clone(tasksSeed),
   };
 
+  const cached = loadCachedState();
+
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...fallback, selectedProjectId: 'all', search: '', statusFilter: 'All', modal: null, error: '' };
-    const parsed = JSON.parse(raw);
     return {
-      projects: Array.isArray(parsed.projects) && parsed.projects.length ? parsed.projects : fallback.projects,
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : fallback.tasks,
+      projects: Array.isArray(cached.projects) && cached.projects.length ? cached.projects : fallback.projects,
+      tasks: Array.isArray(cached.tasks) ? cached.tasks : fallback.tasks,
       selectedProjectId: 'all',
       search: '',
       statusFilter: 'All',
       modal: null,
       error: '',
+      syncConfig: loadSyncConfig(),
+      syncStatus: 'idle',
+      syncMessage: '',
+      remoteLoaded: false,
     };
   } catch {
-    return { ...fallback, selectedProjectId: 'all', search: '', statusFilter: 'All', modal: null, error: '' };
+    return {
+      ...fallback,
+      selectedProjectId: 'all',
+      search: '',
+      statusFilter: 'All',
+      modal: null,
+      error: '',
+      syncConfig: loadSyncConfig(),
+      syncStatus: 'idle',
+      syncMessage: '',
+      remoteLoaded: false,
+    };
+  }
+}
+
+function loadCachedState() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadSyncConfig() {
+  try {
+    const raw = window.localStorage.getItem(SYNC_CONFIG_KEY);
+    if (!raw) return defaultSyncConfig();
+    const parsed = JSON.parse(raw);
+    return { ...defaultSyncConfig(), ...parsed };
+  } catch {
+    return defaultSyncConfig();
+  }
+}
+
+function persistSyncConfig(config) {
+  window.localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(config));
+}
+
+function persistLocalState() {
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ projects: state.projects, tasks: state.tasks }),
+  );
+}
+
+function serializeState() {
+  return {
+    projects: state.projects,
+    tasks: state.tasks,
+  };
+}
+
+function encodeBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function encodeRepoPath(path) {
+  return String(path)
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function repoFileUrl(config) {
+  return `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${encodeRepoPath(config.path)}`;
+}
+
+async function loadRemoteState() {
+  try {
+    const response = await fetch(`${REMOTE_STATE_PATH}?v=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const remote = await response.json();
+    if (Array.isArray(remote.projects) && remote.projects.length) {
+      state.projects = remote.projects;
+    }
+    if (Array.isArray(remote.tasks)) {
+      state.tasks = remote.tasks;
+    }
+    state.remoteLoaded = true;
+    persistLocalState();
+    render();
+  } catch {
+    state.remoteLoaded = false;
+  }
+}
+
+async function syncStateToRepo() {
+  const config = state.syncConfig;
+  if (!config.enabled) return;
+  if (!config.owner || !config.repo || !config.token) {
+    state.syncStatus = 'error';
+    state.syncMessage = 'Configure repository owner, repo, and token first.';
+    render();
+    return;
+  }
+
+  state.syncStatus = 'saving';
+  state.syncMessage = 'Saving to GitHub repository…';
+  render();
+
+  try {
+    const url = repoFileUrl(config);
+    const headers = {
+      Authorization: `Bearer ${config.token}`,
+      Accept: 'application/vnd.github+json',
+    };
+    const getResponse = await fetch(`${url}?ref=${encodeURIComponent(config.branch)}`, { headers });
+    let sha = null;
+    if (getResponse.ok) {
+      const existing = await getResponse.json();
+      sha = existing.sha;
+    } else if (getResponse.status !== 404) {
+      throw new Error(`Unable to read repo file: ${getResponse.status}`);
+    }
+
+    const payload = {
+      message: 'Update ProjectPulse data',
+      content: encodeBase64(JSON.stringify(serializeState(), null, 2)),
+      branch: config.branch,
+      ...(sha ? { sha } : {}),
+    };
+
+    const putResponse = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!putResponse.ok) {
+      const body = await putResponse.text();
+      throw new Error(body || `GitHub save failed: ${putResponse.status}`);
+    }
+
+    state.syncStatus = 'saved';
+    state.syncMessage = 'Saved to GitHub repository.';
+    persistLocalState();
+    render();
+  } catch (error) {
+    state.syncStatus = 'error';
+    state.syncMessage = `GitHub save failed, but local cache was updated. ${error instanceof Error ? error.message : ''}`.trim();
+    persistLocalState();
+    render();
   }
 }
 
@@ -244,6 +410,15 @@ function render() {
           <div class="stat-card"><strong>${completionRate()}%</strong><span>Completion</span></div>
           <div class="stat-card"><strong>${overdueCount()}</strong><span>Overdue</span></div>
           <div class="stat-card"><strong>${state.projects.length}</strong><span>Projects</span></div>
+        </div>
+
+        <div class="sidebar-panel sync-panel">
+          <div>
+            <div class="section-label">GitHub sync</div>
+            <strong>${state.syncConfig.enabled ? 'Repo-backed' : 'Local cache only'}</strong>
+            <p>${state.syncMessage || (state.remoteLoaded ? 'Loaded from repo data file.' : 'Edits stay in this browser until sync is enabled.')}</p>
+          </div>
+          <button class="ghost-button" data-action="open-sync">Sync settings</button>
         </div>
       </aside>
 
@@ -412,6 +587,38 @@ function laneColor(status) {
 
 function renderModal() {
   if (!state.modal) return '';
+  if (state.modal.type === 'sync') {
+    return `
+      <div class="modal-backdrop" data-action="close-modal">
+        <div class="modal" data-stop="true">
+          <div class="modal-header">
+            <div>
+              <span class="section-label">GitHub sync</span>
+              <h2>Repository persistence</h2>
+            </div>
+            <button class="icon-button" data-action="close-modal">×</button>
+          </div>
+          <p class="sync-help">Use a fine-grained GitHub token that can write to this repository. The app stores the token in your browser so it can update <strong>data/projectpulse-state.json</strong>.</p>
+          <form class="composer-form" data-form="sync">
+            <label><span>Enable repo sync</span><input type="checkbox" name="enabled" ${state.syncConfig.enabled ? 'checked' : ''} /></label>
+            <div class="form-grid">
+              <label><span>Owner</span><input name="owner" value="${escapeHtml(state.syncConfig.owner)}" placeholder="your-github-user" /></label>
+              <label><span>Repository</span><input name="repo" value="${escapeHtml(state.syncConfig.repo)}" placeholder="projectManager" /></label>
+            </div>
+            <div class="form-grid">
+              <label><span>Branch</span><input name="branch" value="${escapeHtml(state.syncConfig.branch)}" /></label>
+              <label><span>Path</span><input name="path" value="${escapeHtml(state.syncConfig.path)}" /></label>
+            </div>
+            <label><span>GitHub token</span><input name="token" type="password" value="${escapeHtml(state.syncConfig.token)}" placeholder="ghp_..." /></label>
+            <div class="modal-actions">
+              <button type="button" class="ghost-button" data-action="close-modal">Cancel</button>
+              <button type="submit" class="primary-button">Save sync settings</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
   if (state.modal.type === 'project') {
     return `
       <div class="modal-backdrop" data-action="close-modal">
@@ -494,10 +701,8 @@ function renderModal() {
 }
 
 function saveState() {
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ projects: state.projects, tasks: state.tasks }),
-  );
+  persistLocalState();
+  void syncStateToRepo();
 }
 
 function openTask(taskId = null) {
@@ -508,6 +713,12 @@ function openTask(taskId = null) {
 
 function openProject() {
   state.modal = { type: 'project', name: '', color: '#8b5cf6', description: '' };
+  state.error = '';
+  render();
+}
+
+function openSyncSettings() {
+  state.modal = { type: 'sync' };
   state.error = '';
   render();
 }
@@ -612,6 +823,29 @@ function submitProject(form) {
   state.error = '';
   saveState();
   render();
+}
+
+function submitSyncSettings(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const nextConfig = {
+    enabled: form.elements.enabled.checked,
+    owner: String(data.owner || '').trim(),
+    repo: String(data.repo || '').trim(),
+    branch: String(data.branch || 'main').trim() || 'main',
+    path: String(data.path || 'data/projectpulse-state.json').trim() || 'data/projectpulse-state.json',
+    token: String(data.token || '').trim(),
+  };
+
+  state.syncConfig = nextConfig;
+  persistSyncConfig(nextConfig);
+  state.modal = null;
+  state.syncStatus = 'idle';
+  state.syncMessage = nextConfig.enabled ? 'Repo sync enabled.' : 'Repo sync disabled.';
+  persistLocalState();
+  render();
+  if (nextConfig.enabled) {
+    void syncStateToRepo();
+  }
 }
 
 function applyTaskTimelineShift(taskId, deltaDays) {
@@ -721,6 +955,7 @@ document.addEventListener('click', (event) => {
   const action = actionElement.dataset.action;
   if (action === 'open-task') openTask();
   if (action === 'open-project') openProject();
+  if (action === 'open-sync') openSyncSettings();
   if (action === 'close-modal') closeModal();
   if (action === 'select-project') selectProject(actionElement.dataset.projectId || 'all');
   if (action === 'filter-status') setStatusFilter(actionElement.dataset.status || 'All');
@@ -769,6 +1004,8 @@ document.addEventListener('submit', (event) => {
   event.preventDefault();
   if (form.dataset.form === 'task') submitTask(form);
   if (form.dataset.form === 'project') submitProject(form);
+  if (form.dataset.form === 'sync') submitSyncSettings(form);
 });
 
 render();
+void loadRemoteState();
