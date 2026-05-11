@@ -216,6 +216,49 @@ function modalHealthLabel() {
   return state.remoteLoaded ? 'Connected to repo' : 'Waiting for repo';
 }
 
+function captureModalDraftFromDom() {
+  if (!state.modal) return;
+
+  const form = document.querySelector('.modal form[data-form]');
+  if (!(form instanceof HTMLFormElement)) return;
+
+  const nextDraft = { ...state.modalDraft };
+  for (const element of form.elements) {
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) continue;
+    if (!element.name) continue;
+    nextDraft[element.name] = element.type === 'checkbox' ? element.checked : element.value;
+  }
+
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) {
+    if (form.contains(active)) {
+      state.modalDraftFocus = {
+        form: form.dataset.form || '',
+        name: active.name,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+      };
+    }
+  }
+
+  state.modalDraft = nextDraft;
+}
+
+function restoreModalFocus() {
+  if (!state.modal || !state.modalDraftFocus) return;
+
+  const { form: formName, name, start, end } = state.modalDraftFocus;
+  const form = document.querySelector(`.modal form[data-form="${formName}"]`);
+  if (!(form instanceof HTMLFormElement)) return;
+
+  const field = form.elements.namedItem(name);
+  if (!(field instanceof HTMLElement)) return;
+  if (typeof field.focus === 'function') field.focus();
+  if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && typeof start === 'number' && typeof end === 'number') {
+    field.setSelectionRange(start, end);
+  }
+}
+
 async function syncStateToRepo() {
   const config = state.syncConfig;
   if (!config.enabled) return;
@@ -387,6 +430,7 @@ function visibleProjects() {
 }
 
 function render() {
+  captureModalDraftFromDom();
   const tasks = filteredTasks();
   const project = getSelectedProject();
   const timeline = buildTimeline(tasks);
@@ -596,6 +640,8 @@ function render() {
       ${renderModal()}
     </div>
   `;
+
+  restoreModalFocus();
 }
 
 function laneColor(status) {
@@ -764,6 +810,7 @@ function openSyncSettings() {
 function closeModal() {
   state.modal = null;
   clearModalDraft();
+  state.modalDraftFocus = null;
   state.error = '';
   render();
 }
@@ -837,6 +884,7 @@ function submitTask(form) {
 
   state.modal = null;
   clearModalDraft();
+  state.modalDraftFocus = null;
   state.error = '';
   saveState();
   render();
@@ -861,6 +909,7 @@ function submitProject(form) {
   state.selectedProjectId = project.id;
   state.modal = null;
   clearModalDraft();
+  state.modalDraftFocus = null;
   state.error = '';
   saveState();
   render();
@@ -881,6 +930,7 @@ function submitSyncSettings(form) {
   persistSyncConfig(nextConfig);
   state.modal = null;
   clearModalDraft();
+  state.modalDraftFocus = null;
   state.syncStatus = 'idle';
   state.syncMessage = nextConfig.enabled ? 'Repo sync enabled.' : 'Repo sync disabled.';
   persistLocalState();
