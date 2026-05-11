@@ -27,3 +27,5 @@ The app can persist project and task data to the repository itself by updating [
 3. Save the settings, then create or edit tasks normally.
 
 The browser keeps a local cache too, but the GitHub repo becomes the source of truth once sync is enabled.
+
+Note: the sync connection details you enter in **Sync settings** are stored in your browser, not in the public site. The project/task data is what gets committed into the repo and redeployed through GitHub Pages.

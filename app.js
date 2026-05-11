@@ -100,6 +100,7 @@ function loadState() {
       syncStatus: 'idle',
       syncMessage: '',
       remoteLoaded: false,
+      modalDraft: null,
     };
   } catch {
     return {
@@ -113,6 +114,7 @@ function loadState() {
       syncStatus: 'idle',
       syncMessage: '',
       remoteLoaded: false,
+      modalDraft: null,
     };
   }
 }
@@ -192,6 +194,26 @@ async function loadRemoteState() {
   } catch {
     state.remoteLoaded = false;
   }
+}
+
+function currentModalDraft() {
+  return state.modalDraft || {};
+}
+
+function setModalDraft(draft) {
+  state.modalDraft = draft;
+}
+
+function clearModalDraft() {
+  state.modalDraft = null;
+}
+
+function modalHealthLabel() {
+  if (!state.syncConfig.enabled) return 'Local cache only';
+  if (state.syncStatus === 'saving') return 'Saving to GitHub…';
+  if (state.syncStatus === 'saved') return 'Repo synced';
+  if (state.syncStatus === 'error') return 'Repo sync error';
+  return state.remoteLoaded ? 'Connected to repo' : 'Waiting for repo';
 }
 
 async function syncStateToRepo() {
@@ -415,7 +437,7 @@ function render() {
         <div class="sidebar-panel sync-panel">
           <div>
             <div class="section-label">GitHub sync</div>
-            <strong>${state.syncConfig.enabled ? 'Repo-backed' : 'Local cache only'}</strong>
+            <strong>${modalHealthLabel()}</strong>
             <p>${state.syncMessage || (state.remoteLoaded ? 'Loaded from repo data file.' : 'Edits stay in this browser until sync is enabled.')}</p>
           </div>
           <button class="ghost-button" data-action="open-sync">Sync settings</button>
@@ -588,6 +610,7 @@ function laneColor(status) {
 function renderModal() {
   if (!state.modal) return '';
   if (state.modal.type === 'sync') {
+    const draft = { ...state.syncConfig, ...currentModalDraft() };
     return `
       <div class="modal-backdrop" data-action="close-modal">
         <div class="modal" data-stop="true">
@@ -600,16 +623,16 @@ function renderModal() {
           </div>
           <p class="sync-help">Use a fine-grained GitHub token that can write to this repository. The app stores the token in your browser so it can update <strong>data/projectpulse-state.json</strong>.</p>
           <form class="composer-form" data-form="sync">
-            <label><span>Enable repo sync</span><input type="checkbox" name="enabled" ${state.syncConfig.enabled ? 'checked' : ''} /></label>
+            <label><span>Enable repo sync</span><input type="checkbox" name="enabled" ${draft.enabled ? 'checked' : ''} /></label>
             <div class="form-grid">
-              <label><span>Owner</span><input name="owner" value="${escapeHtml(state.syncConfig.owner)}" placeholder="your-github-user" /></label>
-              <label><span>Repository</span><input name="repo" value="${escapeHtml(state.syncConfig.repo)}" placeholder="projectManager" /></label>
+              <label><span>Owner</span><input name="owner" value="${escapeHtml(draft.owner)}" placeholder="your-github-user" /></label>
+              <label><span>Repository</span><input name="repo" value="${escapeHtml(draft.repo)}" placeholder="projectManager" /></label>
             </div>
             <div class="form-grid">
-              <label><span>Branch</span><input name="branch" value="${escapeHtml(state.syncConfig.branch)}" /></label>
-              <label><span>Path</span><input name="path" value="${escapeHtml(state.syncConfig.path)}" /></label>
+              <label><span>Branch</span><input name="branch" value="${escapeHtml(draft.branch)}" /></label>
+              <label><span>Path</span><input name="path" value="${escapeHtml(draft.path)}" /></label>
             </div>
-            <label><span>GitHub token</span><input name="token" type="password" value="${escapeHtml(state.syncConfig.token)}" placeholder="ghp_..." /></label>
+            <label><span>GitHub token</span><input name="token" type="password" value="${escapeHtml(draft.token)}" placeholder="ghp_..." /></label>
             <div class="modal-actions">
               <button type="button" class="ghost-button" data-action="close-modal">Cancel</button>
               <button type="submit" class="primary-button">Save sync settings</button>
@@ -620,6 +643,7 @@ function renderModal() {
     `;
   }
   if (state.modal.type === 'project') {
+    const draft = { name: '', color: '#8b5cf6', description: '', ...currentModalDraft() };
     return `
       <div class="modal-backdrop" data-action="close-modal">
         <div class="modal" data-stop="true">
@@ -632,9 +656,9 @@ function renderModal() {
           </div>
           ${state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : ''}
           <form class="composer-form" data-form="project">
-            <label><span>Name</span><input name="name" value="${escapeHtml(state.modal.name || '')}" /></label>
-            <label><span>Color</span><input type="color" name="color" value="${escapeHtml(state.modal.color || '#8b5cf6')}" /></label>
-            <label><span>Description</span><textarea name="description" rows="4">${escapeHtml(state.modal.description || '')}</textarea></label>
+            <label><span>Name</span><input name="name" value="${escapeHtml(draft.name)}" /></label>
+            <label><span>Color</span><input type="color" name="color" value="${escapeHtml(draft.color)}" /></label>
+            <label><span>Description</span><textarea name="description" rows="4">${escapeHtml(draft.description)}</textarea></label>
             <div class="modal-actions">
               <button type="button" class="ghost-button" data-action="close-modal">Cancel</button>
               <button type="submit" class="primary-button">Create project</button>
@@ -646,7 +670,8 @@ function renderModal() {
   }
 
   const task = state.modal.taskId ? state.tasks.find((item) => item.id === state.modal.taskId) : null;
-  const draft = task || {
+  const draft = {
+    ...(task || {
     title: '',
     projectId: state.selectedProjectId === 'all' ? state.projects[0]?.id || '' : state.selectedProjectId,
     assignee: '',
@@ -654,6 +679,8 @@ function renderModal() {
     status: 'Backlog',
     dueDate: tomorrow(2),
     notes: '',
+    }),
+    ...currentModalDraft(),
   };
 
   return `
@@ -707,24 +734,36 @@ function saveState() {
 
 function openTask(taskId = null) {
   state.modal = { type: 'task', taskId };
+  state.modalDraft = taskId ? clone(state.tasks.find((item) => item.id === taskId) || {}) : {
+    title: '',
+    projectId: state.selectedProjectId === 'all' ? state.projects[0]?.id || '' : state.selectedProjectId,
+    assignee: '',
+    priority: 'Medium',
+    status: 'Backlog',
+    dueDate: tomorrow(2),
+    notes: '',
+  };
   state.error = '';
   render();
 }
 
 function openProject() {
-  state.modal = { type: 'project', name: '', color: '#8b5cf6', description: '' };
+  state.modal = { type: 'project' };
+  state.modalDraft = { name: '', color: '#8b5cf6', description: '' };
   state.error = '';
   render();
 }
 
 function openSyncSettings() {
   state.modal = { type: 'sync' };
+  state.modalDraft = { ...state.syncConfig };
   state.error = '';
   render();
 }
 
 function closeModal() {
   state.modal = null;
+  clearModalDraft();
   state.error = '';
   render();
 }
@@ -797,6 +836,7 @@ function submitTask(form) {
   }
 
   state.modal = null;
+  clearModalDraft();
   state.error = '';
   saveState();
   render();
@@ -820,6 +860,7 @@ function submitProject(form) {
   state.projects = [project, ...state.projects];
   state.selectedProjectId = project.id;
   state.modal = null;
+  clearModalDraft();
   state.error = '';
   saveState();
   render();
@@ -839,6 +880,7 @@ function submitSyncSettings(form) {
   state.syncConfig = nextConfig;
   persistSyncConfig(nextConfig);
   state.modal = null;
+  clearModalDraft();
   state.syncStatus = 'idle';
   state.syncMessage = nextConfig.enabled ? 'Repo sync enabled.' : 'Repo sync disabled.';
   persistLocalState();
@@ -993,6 +1035,15 @@ document.addEventListener('pointercancel', (event) => {
 
 document.addEventListener('input', (event) => {
   const target = event.target;
+  const form = target instanceof Element ? target.closest('form[data-form]') : null;
+  if (form instanceof HTMLFormElement && state.modal) {
+    const currentDraft = { ...(state.modalDraft || {}) };
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+      currentDraft[target.name] = target.type === 'checkbox' ? target.checked : target.value;
+      setModalDraft(currentDraft);
+      return;
+    }
+  }
   if (target instanceof HTMLInputElement && target.dataset.field === 'search') {
     setSearch(target.value);
   }
